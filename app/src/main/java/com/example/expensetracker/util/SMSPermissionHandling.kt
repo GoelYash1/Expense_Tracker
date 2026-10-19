@@ -18,13 +18,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavHostController
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.shouldShowRationale
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalPermissionsApi::class)
@@ -36,19 +39,18 @@ fun SMSPermissionHandling(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    val sharedPreferences =
-        LocalContext.current.getSharedPreferences("MySharedPreferences", Context.MODE_PRIVATE)
+    val sharedPreferences = context.getSharedPreferences("MySharedPreferences", Context.MODE_PRIVATE)
     val permissionGrantedToastShown =
         sharedPreferences.getBoolean("permissionGrantedToastShown", false)
     val permissionDialogCanceled = sharedPreferences.getBoolean("permissionDialogCanceled", false)
 
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    DisposableEffect(key1 = lifecycleOwner, effect = {
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> {
-                    if (!permissionState.hasPermission && !permissionState.shouldShowRationale && !permissionState.permissionRequested && !permissionDialogCanceled) {
+                    if (!permissionState.status.isGranted && !permissionState.status.shouldShowRationale && !permissionDialogCanceled) {
                         permissionState.launchPermissionRequest()
                     }
                 }
@@ -64,32 +66,21 @@ fun SMSPermissionHandling(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
-    })
+    }
 
-    LaunchedEffect(permissionState.hasPermission, permissionState.shouldShowRationale) {
-        if (permissionState.hasPermission) {
+    LaunchedEffect(permissionState.status) {
+        if (permissionState.status.isGranted) {
             if (!permissionGrantedToastShown) {
                 Toast.makeText(context, "SMS permission has been granted", Toast.LENGTH_SHORT)
                     .show()
-                sharedPreferences.edit().putBoolean("permissionGrantedToastShown", true).apply()
+                sharedPreferences.edit { putBoolean("permissionGrantedToastShown", true) }
             }
             mainNavController.navigate(Main.route)
-        } else if (!permissionState.shouldShowRationale && permissionState.permissionRequested) {
-            mainNavController.navigate(Main.route)
-        }
-    }
-
-
-    LaunchedEffect(permissionState.permissionRequested) {
-        if (permissionState.permissionRequested && !permissionState.hasPermission && !permissionState.shouldShowRationale) {
-            coroutineScope.launch {
-                mainNavController.navigate(Main.route)
-            }
         }
     }
 
     when {
-        permissionState.shouldShowRationale && !permissionDialogCanceled -> {
+        !permissionState.status.isGranted && permissionState.status.shouldShowRationale && !permissionDialogCanceled -> {
             // Show rationale in an AlertDialog
             AlertDialog(
                 onDismissRequest = {
@@ -122,8 +113,7 @@ fun SMSPermissionHandling(
                         Button(
                             onClick = {
                                 // Navigate to the main screen when dismissed
-                                sharedPreferences.edit()
-                                    .putBoolean("permissionDialogCanceled", true).apply()
+                                sharedPreferences.edit { putBoolean("permissionDialogCanceled", true) }
                                 mainNavController.navigate(Main.route)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
